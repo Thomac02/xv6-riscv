@@ -39,6 +39,14 @@ int main(int argc, char *argv[]) {
 // me to notice and understand these mistakes. My solution looks similar to his, but I moved
 // the close of the read side of the pipe to after the wait. If the read side is closed 
 // before this I think there's a chance the next process could still be reading from it.
+//
+// UPDATE: Read through the kernel code (kernel/proc.c:298, fork()). When fork() is called
+// and a child process created, the refcounts of all the parent's open files get incremented.
+// This refcount gets decremented when close() is called on a fd for the file, so actually
+// if we want to clean up properly, we should close file descriptors in both the parent and
+// the child. We could probably close the write side of the new pipe and left before calling
+// pipe() - this will reduce their refcount to zero, so they'll be closed by the kernel and
+// won't be duped in fork().
 void sieve(int left) {
 	// Read the first value that's been sent to us.
 	int num, i;
@@ -58,9 +66,9 @@ void sieve(int left) {
 			write(p[1], &i, sizeof(int));
 		}
 	}
-	close(left);
-	close(p[1]);
 	if (!wrote) {
+		close(left);
+		close(p[1]);
 		close(p[0]);
 		exit(0);
 	}
@@ -69,11 +77,15 @@ void sieve(int left) {
 		// We've read all we need to from the left, and
 		// written all we need to the write, so close the
 		// pipes.
+		close(left);
+		close(p[1]);
 		sieve(p[0]);
 		close(p[0]);
 	} else {
-		wait(0);
 		close(p[0]);
+		close(left);
+		close(p[1]);
+		wait(0);
 		exit(0);
 	}
 }
